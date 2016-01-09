@@ -125,6 +125,11 @@
 
 #define FT_STATUS_NUM_TP_MASK	0x0F
 
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#include <linux/input/prevent_sleep.h>
+bool dit_suspend = false;
+#endif
+
 #define FT_VTG_MIN_UV		2600000
 #define FT_VTG_MAX_UV		3300000
 #define FT_I2C_VTG_MIN_UV	1800000
@@ -1208,6 +1213,18 @@ static int ft5x06_ts_suspend(struct device *dev)
 {
 	struct ft5x06_ts_data *data = dev_get_drvdata(dev);
 	int err;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	bool prevent_sleep = false;
+	ts_get_prevent_sleep(prevent_sleep);
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep) {
+		dit_suspend = true;
+		enable_irq_wake(ft5x06->irq);
+	} else {
+		dit_suspend = false;
+#endif
 
 	if (data->loading_fw) {
 		dev_info(dev, "Firmware loading in process...\n");
@@ -1245,12 +1262,25 @@ static int ft5x06_ts_suspend(struct device *dev)
 	}
 
 	return ft5x06_ts_stop(dev);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	} // if (prevent_sleep)
+#endif
 }
 
 static int ft5x06_ts_resume(struct device *dev)
 {
 	struct ft5x06_ts_data *data = dev_get_drvdata(dev);
 	int err;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	bool prevent_sleep = false;
+	ts_get_prevent_sleep(prevent_sleep);
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep && dit_suspend) {
+		disable_irq_wake(ft5x06->irq);
+	} else {
+#endif
 
 	if (!data->suspended) {
 		dev_dbg(dev, "Already in awake state\n");
@@ -1301,6 +1331,9 @@ static int ft5x06_ts_resume(struct device *dev)
 		data->gesture_pdata->in_pocket = 0;
 	}
 	return 0;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	} // if (prevent_sleep)
+#endif
 }
 
 static const struct dev_pm_ops ft5x06_ts_pm_ops = {
@@ -2299,7 +2332,11 @@ static int ft5x06_ts_probe(struct i2c_client *client,
 	* the interrupt trigger mode will be set in Device Tree with property
 	* "interrupts", so here we just need to set the flag IRQF_ONESHOT
 	*/
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 				IRQF_ONESHOT,
+#else
+				IRQF_ONESHOT | IRQF_NO_SUSPEND,
+#endif
 				client->dev.driver->name, data);
 	if (err) {
 		dev_err(&client->dev, "request irq failed\n");
