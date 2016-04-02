@@ -35,7 +35,7 @@ extern bool in_phone_call; //  to track if phone's in call
 	prevent_sleep = (prevent_sleep && !in_phone_call); \
 }
 #else
-#if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE) || definedCONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+#if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE) || defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
 #ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
 #define ts_get_prevent_sleep(prevent_sleep) { \
 	prevent_sleep = (s2w_switch > 0); \
