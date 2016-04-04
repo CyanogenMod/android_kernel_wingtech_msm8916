@@ -1060,6 +1060,11 @@ static int ft5x06_ts_start(struct device *dev)
 	bool prevent_sleep = false;
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 	ts_get_prevent_sleep(prevent_sleep);
+	if (prevent_sleep) {
+		/* enable the key panel touches back again */
+		__set_bit(EV_KEY, data->input_dev->evbit);
+		input_sync(data->input_dev);
+	}
 #endif
 
 	if (data->pdata->power_on) {
@@ -1201,6 +1206,14 @@ static int ft5x06_ts_stop(struct device *dev)
 	}
 
 	data->suspended = true;
+
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep) {
+		/* disable the key panel touches */
+		__clear_bit(EV_KEY, data->input_dev->evbit);
+		input_sync(data->input_dev);
+	}
+#endif
 
 	return 0;
 
