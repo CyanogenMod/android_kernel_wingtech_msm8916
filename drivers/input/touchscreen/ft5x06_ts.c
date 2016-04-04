@@ -1052,6 +1052,47 @@ err_pinctrl_get:
 	return retval;
 }
 
+static int dt2w_toggle_rebalance_irq(struct device *dev)
+{
+	struct ft5x06_ts_data *data = dev_get_drvdata(dev);
+
+	/* if the toggle happens during the screen OFF, we need
+	 * to reblance the IRQ
+	 */
+	if (dt2w_toggled) {
+		if (data->suspended == true) {
+			if (dt2w_switch == 0) {
+				/* Toggled dt2w to OFF while the screen OFF
+				 * we have been with enable_irq_wake()
+				 */
+				disable_irq_wake(data->client->irq);
+				disable_irq(data->client->irq);
+#if DT2W_DEBUG
+				pr_info("%s: IRQ now disable_irq_wake()\n", __func__);
+				pr_info("%s: IRQ now disable_irq()\n", __func__);
+				pr_info("%s: Rebalanced IRQ while dt2w OFF "
+						"during screen-off\n", __func__);
+#endif
+			} else {
+				/* Toggled dt2w to ON while the screen OFF
+				 * we have been with disable_irq()
+				 */
+				enable_irq(data->client->irq);
+				enable_irq_wake(data->client->irq);
+#if DT2W_DEBUG
+				pr_info("%s: IRQ now enable_irq()\n", __func__);
+				pr_info("%s: IRQ now enable_irq_wake()\n", __func__);
+				pr_info("%s: Rebalanced IRQ while dt2w ON "
+						"during screen-off\n", __func__);
+#endif
+			}
+		}
+	}
+
+	dt2w_toggled = false;
+	return 0;
+}
+
 #ifdef CONFIG_PM
 static int ft5x06_ts_start(struct device *dev)
 {
@@ -1059,12 +1100,17 @@ static int ft5x06_ts_start(struct device *dev)
 	int err;
 	bool prevent_sleep = false;
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+
+	dt2w_toggle_rebalance_irq(dev);
+
 	ts_get_prevent_sleep(prevent_sleep);
-	if (prevent_sleep) {
-		/* enable the key panel touches back again */
-		__set_bit(EV_KEY, data->input_dev->evbit);
-		input_sync(data->input_dev);
-	}
+#if DT2W_DEBUG
+	pr_info("%s: Prevent Sleep is computed as '%s'\n",
+			__func__, (prevent_sleep) ? "yes" : "no");
+#endif
+	/* enable the key panel touches back again */
+	__set_bit(EV_KEY, data->input_dev->evbit);
+	input_sync(data->input_dev);
 #endif
 
 	if (data->pdata->power_on) {
@@ -1115,8 +1161,14 @@ static int ft5x06_ts_start(struct device *dev)
 	pre_charger_status = is_charger_plug;
 #endif
 	if (prevent_sleep) {
+#if DT2W_DEBUG
+		pr_info("%s: IRQ now disable_irq_wake()\n", __func__);
+#endif
 		disable_irq_wake(data->client->irq);
 	} else {
+#if DT2W_DEBUG
+		pr_info("%s: IRQ now enable_irq()\n", __func__);
+#endif
 		enable_irq(data->client->irq);
 	}
 
@@ -1151,13 +1203,29 @@ static int ft5x06_ts_stop(struct device *dev)
 
 	bool prevent_sleep = false;
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+
+	/* The below call just resets the toggle flag, no need of rebalancing
+	 * irq here
+	 */
+	dt2w_toggle_rebalance_irq(dev);
+
 	ts_get_prevent_sleep(prevent_sleep);
+#if DT2W_DEBUG
+	pr_info("%s: Prevent Sleep is computed as '%s'\n",
+			__func__, (prevent_sleep) ? "yes" : "no");
+#endif
 #endif
 
 	if (!prevent_sleep) {
+#if DT2W_DEBUG
+		pr_info("%s: IRQ now disable_irq()\n", __func__);
+#endif
 		disable_irq(data->client->irq);
 		dit_suspend = false;
 	} else {
+#if DT2W_DEBUG
+		pr_info("%s: IRQ now enable_irq_wake()\n", __func__);
+#endif
 		enable_irq_wake(data->client->irq);
 		dit_suspend = true;
 	}
@@ -1377,12 +1445,16 @@ static int fb_notifier_callback(struct notifier_block *self,
 		blank = evdata->data;
 		if (*blank == FB_BLANK_UNBLANK) {
 			if (unblanked_once) {
+#if DT2W_DEBUG
 				pr_info("ft5x06 resume!\n");
+#endif
 				ft5x06_ts_resume(&ft5x06_data->client->dev);
 			}
 		} else if (*blank == FB_BLANK_POWERDOWN) {
 			unblanked_once = true;
+#if DT2W_DEBUG
 			pr_info("ft5x06 suspend!\n");
+#endif
 			ft5x06_ts_suspend(&ft5x06_data->client->dev);
 		}
 	}

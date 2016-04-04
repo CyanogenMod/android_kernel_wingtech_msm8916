@@ -63,7 +63,6 @@ MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPLv2");
 
 /* Tuneables */
-#define DT2W_DEBUG		1
 #define DT2W_DEFAULT		0
 
 #define DT2W_PWRKEY_DUR		60
@@ -72,6 +71,7 @@ MODULE_LICENSE("GPLv2");
 /* Resources */
 int dt2w_switch = DT2W_DEFAULT;
 bool dt2w_scr_suspended = false;
+bool dt2w_toggled = false;
 int dt2w_sent_play_pause = 0;
 int dt2w_feather = 200, dt2w_feather_w = 1;
 static cputime64_t tap_time_pre = 0;
@@ -386,8 +386,11 @@ static ssize_t dt2w_doubletap2wake_dump(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
 	if (buf[0] >= '0' && buf[0] <= '2' && buf[1] == '\n')
-                if (dt2w_switch != buf[0] - '0')
+                if (dt2w_switch != buf[0] - '0') {
 		        dt2w_switch = buf[0] - '0';
+			dt2w_toggled = true;
+			pr_info("[dump_dt2w]: DoubleTap2Wake toggled. | dt2w='%d'\n", dt2w_switch);
+		}
 
 	return count;
 }

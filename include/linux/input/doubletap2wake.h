@@ -23,5 +23,8 @@
 
 extern bool dt2w_scr_suspended;
 extern int dt2w_switch;
+extern bool dt2w_toggled;
+
+#define DT2W_DEBUG		0
 
 #endif	/* _LINUX_DOUBLETAP2WAKE_H */
