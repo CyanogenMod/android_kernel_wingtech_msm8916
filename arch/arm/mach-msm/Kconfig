@@ -1090,4 +1090,9 @@ config FORCE_FAST_CHARGE
 	  This allows users to override default charge rate for both USB and AC
 	  charger input current
 
+config MSM_SLEEPER
+	bool "CPU hotplug driver"
+	default y
+	help
+	  CPU hotplug driver
 endif
