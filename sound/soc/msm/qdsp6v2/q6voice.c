@@ -31,6 +31,7 @@
 
 #ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
 extern bool in_phone_call;
+#include <linux/input/doubletap2wake.h>
 #endif
 
 #define CMD_STATUS_SUCCESS 0
