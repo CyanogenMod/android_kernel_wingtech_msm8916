@@ -269,6 +269,9 @@ struct ft5x06_ts_data {
 	struct dentry *dir;
 	u16 addr;
 	bool suspended;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	bool prevent_sleep;
+#endif
 	char *ts_info;
 	u8 *tch_data;
 	u32 tch_data_len;
@@ -1056,40 +1059,34 @@ static int dt2w_toggle_rebalance_irq(struct device *dev)
 {
 	struct ft5x06_ts_data *data = dev_get_drvdata(dev);
 
-	/* if the toggle happens during the screen OFF, we need
-	 * to reblance the IRQ
+	/* 
+	 * Prema Chand Alugu (premaca@gmail.com)
+	 *
+	 * This function must be called only when we know that prevent_sleep state
+	 * has been changed while the screen off.
 	 */
-	if (dt2w_toggled) {
-		if (data->suspended == true) {
-			if (dt2w_switch == 0) {
-				/* Toggled dt2w to OFF while the screen OFF
-				 * we have been with enable_irq_wake()
-				 */
-				disable_irq_wake(data->client->irq);
-				disable_irq(data->client->irq);
+	if (data->prevent_sleep) {
+		// we have been with wake irqs so far [enable_irq_wake()]
+		disable_irq_wake(data->client->irq);
+		disable_irq(data->client->irq);
 #if DT2W_DEBUG
-				pr_info("%s: IRQ now disable_irq_wake()\n", __func__);
-				pr_info("%s: IRQ now disable_irq()\n", __func__);
-				pr_info("%s: Rebalanced IRQ while dt2w OFF "
-						"during screen-off\n", __func__);
+		pr_info("%s: IRQ now disable_irq_wake()\n", __func__);
+		pr_info("%s: IRQ now disable_irq()\n", __func__);
+		pr_info("%s: Rebalanced IRQ while dt2w OFF "
+				"during screen-off\n", __func__);
 #endif
-			} else {
-				/* Toggled dt2w to ON while the screen OFF
-				 * we have been with disable_irq()
-				 */
-				enable_irq(data->client->irq);
-				enable_irq_wake(data->client->irq);
+	} else {
+		// we have been with irqs so far [disable_irq()]
+		enable_irq(data->client->irq);
+		enable_irq_wake(data->client->irq);
 #if DT2W_DEBUG
-				pr_info("%s: IRQ now enable_irq()\n", __func__);
-				pr_info("%s: IRQ now enable_irq_wake()\n", __func__);
-				pr_info("%s: Rebalanced IRQ while dt2w ON "
-						"during screen-off\n", __func__);
+		pr_info("%s: IRQ now enable_irq()\n", __func__);
+		pr_info("%s: IRQ now enable_irq_wake()\n", __func__);
+		pr_info("%s: Rebalanced IRQ while dt2w ON "
+				"during screen-off\n", __func__);
 #endif
-			}
-		}
 	}
 
-	dt2w_toggled = false;
 	return 0;
 }
 
@@ -1100,10 +1097,20 @@ static int ft5x06_ts_start(struct device *dev)
 	int err;
 	bool prevent_sleep = false;
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-
-	dt2w_toggle_rebalance_irq(dev);
-
 	ts_get_prevent_sleep(prevent_sleep);
+	if (prevent_sleep != data->prevent_sleep) {
+		/* 
+		 * Prema Chand Alugu (premaca@gmail.com)
+		 *
+		 * simply the rebalance requirement; the prevent_sleep state is
+		 * stored in the dev structure, if there is any change while
+		 * the screen was off, we definitely need to rebalance
+		 * the state could be changed by the following known events
+		 * 1. toggled has been modified while screen was off
+		 * 2. in_phone_call state changed while screen was off
+		 */
+	    dt2w_toggle_rebalance_irq(dev);
+	}
 #if DT2W_DEBUG
 	pr_info("%s: Prevent Sleep is computed as '%s'\n",
 			__func__, (prevent_sleep) ? "yes" : "no");
@@ -1173,6 +1180,7 @@ static int ft5x06_ts_start(struct device *dev)
 	}
 
 	data->suspended = false;
+	data->prevent_sleep = prevent_sleep;
 
 	return 0;
 
@@ -1203,19 +1211,12 @@ static int ft5x06_ts_stop(struct device *dev)
 
 	bool prevent_sleep = false;
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-
-	/* The below call just resets the toggle flag, no need of rebalancing
-	 * irq here
-	 */
-	dt2w_toggle_rebalance_irq(dev);
-
 	ts_get_prevent_sleep(prevent_sleep);
 #if DT2W_DEBUG
 	pr_info("%s: Prevent Sleep is computed as '%s'\n",
 			__func__, (prevent_sleep) ? "yes" : "no");
 #endif
 #endif
-
 	if (!prevent_sleep) {
 #if DT2W_DEBUG
 		pr_info("%s: IRQ now disable_irq()\n", __func__);
@@ -1281,6 +1282,7 @@ static int ft5x06_ts_stop(struct device *dev)
 		__clear_bit(EV_KEY, data->input_dev->evbit);
 		input_sync(data->input_dev);
 	}
+	data->prevent_sleep = prevent_sleep;
 #endif
 
 	return 0;
