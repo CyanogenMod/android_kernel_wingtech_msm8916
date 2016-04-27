@@ -174,19 +174,16 @@ static DECLARE_WORK(doubletap2wake_presspwr_work, doubletap2wake_presspwr);
 
 /* PowerKey trigger */
 static void doubletap2wake_pwrtrigger(void) {
-	schedule_work(&doubletap2wake_presspwr_work);
 #ifdef CONFIG_PSENSOR_ONDEMAND_STATE
 	/*
 	 * Prema Chand Alugu (premaca@gmail.com)
-	 * After the dt2w is scheduled, check the proximity sensor on demand.
-	 * This would give a breath-in time if required to the proximity sensor
-	 * to consume any delays. The returned state should be checked when the
+	 * check the proximity sensor on demand.
+	 * The returned state should be checked when the
 	 * dt2w is actually performed.
-	 *
-	 * If required, we need to check the state before scheduling itself
 	 */
 	dtw2_psensor_state = ltr553_ps_ondemand_state();
 #endif
+	schedule_work(&doubletap2wake_presspwr_work);
         return;
 }
 

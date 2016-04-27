@@ -1448,7 +1448,6 @@ int ltr553_ps_ondemand_state (void)
 	unsigned int config;
 	unsigned int tmp;
 	u8 buf[7];
-	ktime_t	timestamp;
 	int rc = 0;
 	u8 ps_data[4];
 	int i;
@@ -1491,6 +1490,7 @@ int ltr553_ps_ondemand_state (void)
 		goto exit;
 	}
 
+
 	rc = regmap_read(ltr->regmap, LTR553_REG_PS_MEAS_RATE, &tmp);
 	if (rc) {
 		dev_err(&ltr->i2c->dev, "read %d failed.(%d)\n",
@@ -1498,10 +1498,23 @@ int ltr553_ps_ondemand_state (void)
 		goto exit;
 	}
 
-	/* Wait for data ready */
-	msleep(ps_mrr_table[tmp & 0xf] + LTR553_WAKE_TIME_MS);
+	rc = regmap_write(ltr->regmap, LTR553_REG_PS_MEAS_RATE,
+			LTR553_PS_MEASUREMENT_RATE_10MS);
+	if (rc) {
+		dev_err(&ltr->i2c->dev, "read %d failed.(%d)\n",
+				LTR553_REG_PS_MEAS_RATE, rc);
+		goto exit;
+	}
 
-	timestamp = ktime_get_boottime();
+	/* Wait for data ready */
+	msleep(LTR553_WAKE_TIME_MS);
+
+	rc = regmap_write(ltr->regmap, LTR553_REG_PS_MEAS_RATE, tmp);
+	if (rc) {
+		dev_err(&ltr->i2c->dev, "read %d failed.(%d)\n",
+				LTR553_REG_PS_MEAS_RATE, rc);
+		goto exit;
+	}
 
 	rc = regmap_bulk_read(ltr->regmap, LTR553_REG_PS_DATA_0,
 			ps_data, 2);
