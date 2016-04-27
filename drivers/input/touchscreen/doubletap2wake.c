@@ -87,7 +87,7 @@ int dtw2_psensor_state = LTR553_ON_DEMAND_RESET;
 #endif
 static cputime64_t tap_time_pre = 0;
 static int touch_x = 0, touch_y = 0, touch_nr = 0, x_pre = 0, y_pre = 0;
-static bool touch_x_called = false, touch_y_called = false, touch_cnt = true;
+static bool touch_x_called = false, touch_y_called = false, touch_cnt = false;
 static bool exec_count = true;
 #ifndef WAKE_HOOKS_DEFINED
 #ifndef CONFIG_HAS_EARLYSUSPEND
@@ -201,7 +201,7 @@ static unsigned int calc_feather(int coord, int prev_coord) {
 
 /* init a new touch */
 static void new_touch(int x, int y) {
-	tap_time_pre = ktime_to_ms(ktime_get());
+	tap_time_pre = ktime_to_ms(ktime_get_real());
 	x_pre = x;
 	y_pre = y;
 	touch_nr++;
@@ -231,20 +231,26 @@ static void detect_doubletap2wake(int x, int y, bool st)
 		} else if (touch_nr == 1) {
 			if ((calc_feather(x, x_pre) < dt2w_feather) &&
 			    (calc_feather(y, y_pre) < dt2w_feather) &&
-			    ((ktime_to_ms(ktime_get())-tap_time_pre) < DT2W_TIME)) {
+			    ((ktime_to_ms(ktime_get_real())-tap_time_pre) < DT2W_TIME)) {
 				touch_nr++;
+#if DT2W_DEBUG
 				pr_info(LOGTAG"touch_nr is now %d\n",touch_nr);
+#endif
 			} else {
 				doubletap2wake_reset();
 				new_touch(x, y);
+#if DT2W_DEBUG
 				pr_info(LOGTAG"feather/time check failed, "
 					"reset&newtouch, touch_nr=%d\n",touch_nr);
+#endif
 			}
 		} else {
 			doubletap2wake_reset();
 			new_touch(x, y);
+#if DT2W_DEBUG
 			pr_info(LOGTAG"touch_nr was more than 1, "
 				"reset&newtouch, touch_nr=%d\n",touch_nr);
+#endif
 		}
 		if ((touch_nr > 1)) {
 			pr_info(LOGTAG"ON\n");
@@ -284,7 +290,9 @@ static void dt2w_input_event(struct input_handle *handle, unsigned int type,
 
 	if (code == ABS_MT_TRACKING_ID && value == -1) {
 		touch_cnt = true;
-		return;
+		if ((!touch_x_called) || (!touch_y_called)) {
+		    return;
+		}
 	}
 
 	if (code == ABS_MT_POSITION_X) {
@@ -297,7 +305,7 @@ static void dt2w_input_event(struct input_handle *handle, unsigned int type,
 		touch_y_called = true;
 	}
 
-	if (touch_x_called || touch_y_called) {
+	if ((touch_x_called || touch_y_called) && (touch_cnt)) {
 		touch_x_called = false;
 		touch_y_called = false;
 		queue_work_on(0, dt2w_input_wq, &dt2w_input_work);
