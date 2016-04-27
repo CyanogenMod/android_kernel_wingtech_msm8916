@@ -43,6 +43,11 @@
 #endif
 #endif // WAKE_HOOKS_DEFINED
 
+#ifdef CONFIG_PSENSOR_ONDEMAND_STATE
+#include <linux/ltr553.h>
+extern int ltr553_ps_ondemand_state (void);
+#endif
+
 /* uncomment since no touchscreen defines android touch, do that here */
 //#define ANDROID_TOUCH_DECLARED
 
@@ -77,6 +82,9 @@ bool dt2w_scr_suspended = false;
 bool in_phone_call = false;
 int dt2w_sent_play_pause = 0;
 int dt2w_feather = 200, dt2w_feather_w = 1;
+#ifdef CONFIG_PSENSOR_ONDEMAND_STATE
+int dtw2_psensor_state = LTR553_ON_DEMAND_RESET;
+#endif
 static cputime64_t tap_time_pre = 0;
 static int touch_x = 0, touch_y = 0, touch_nr = 0, x_pre = 0, y_pre = 0;
 static bool touch_x_called = false, touch_y_called = false, touch_cnt = true;
@@ -135,6 +143,22 @@ static void doubletap2wake_reset(void) {
 
 /* PowerKey work func */
 static void doubletap2wake_presspwr(struct work_struct * doubletap2wake_presspwr_work) {
+#ifdef CONFIG_PSENSOR_ONDEMAND_STATE
+	if (dtw2_psensor_state == LTR553_ON_DEMAND_COVERED) {
+#if DT2W_DEBUG
+	    pr_info("%s:%d -Proximity Sensor is covered, dt2w is ignored\n",
+		    __func__, __LINE__);
+#endif
+		dtw2_psensor_state = LTR553_ON_DEMAND_RESET;
+		return;
+	}
+	dtw2_psensor_state = LTR553_ON_DEMAND_RESET;
+#if DT2W_DEBUG
+	pr_info("%s:%d -Proximity Sensor is not covered, dt2w can wakeup device\n",
+		__func__, __LINE__);
+#endif
+#endif
+
 	if (!mutex_trylock(&pwrkeyworklock))
                 return;
 	input_event(doubletap2wake_pwrdev, EV_KEY, KEY_POWER, 1);
@@ -151,6 +175,18 @@ static DECLARE_WORK(doubletap2wake_presspwr_work, doubletap2wake_presspwr);
 /* PowerKey trigger */
 static void doubletap2wake_pwrtrigger(void) {
 	schedule_work(&doubletap2wake_presspwr_work);
+#ifdef CONFIG_PSENSOR_ONDEMAND_STATE
+	/*
+	 * Prema Chand Alugu (premaca@gmail.com)
+	 * After the dt2w is scheduled, check the proximity sensor on demand.
+	 * This would give a breath-in time if required to the proximity sensor
+	 * to consume any delays. The returned state should be checked when the
+	 * dt2w is actually performed.
+	 *
+	 * If required, we need to check the state before scheduling itself
+	 */
+	dtw2_psensor_state = ltr553_ps_ondemand_state();
+#endif
         return;
 }
 
@@ -176,8 +212,11 @@ static void detect_doubletap2wake(int x, int y, bool st)
 {
         bool single_touch = st;
 #if DT2W_DEBUG
-        pr_info(LOGTAG"x,y(%4d,%4d) single:%s\n",
-                x, y, (single_touch) ? "true" : "false");
+        pr_info(LOGTAG"x,y(%4d,%4d) single:%s dt2w_switch:%d exec_count:%s "
+		"touch_cnt:%s touch_nr=%d dt2w_feather_w:%d\n",
+                x, y, (single_touch) ? "true" : "false", dt2w_switch,
+                (exec_count) ? "true" : "false", (touch_cnt) ? "true" : "false",
+		touch_nr, dt2w_feather_w);
 #endif
 	if (dt2w_feather_w == 2)
 		dt2w_feather = 100;
@@ -192,15 +231,20 @@ static void detect_doubletap2wake(int x, int y, bool st)
 		} else if (touch_nr == 1) {
 			if ((calc_feather(x, x_pre) < dt2w_feather) &&
 			    (calc_feather(y, y_pre) < dt2w_feather) &&
-			    ((ktime_to_ms(ktime_get())-tap_time_pre) < DT2W_TIME))
+			    ((ktime_to_ms(ktime_get())-tap_time_pre) < DT2W_TIME)) {
 				touch_nr++;
-			else {
+				pr_info(LOGTAG"touch_nr is now %d\n",touch_nr);
+			} else {
 				doubletap2wake_reset();
 				new_touch(x, y);
+				pr_info(LOGTAG"feather/time check failed, "
+					"reset&newtouch, touch_nr=%d\n",touch_nr);
 			}
 		} else {
 			doubletap2wake_reset();
 			new_touch(x, y);
+			pr_info(LOGTAG"touch_nr was more than 1, "
+				"reset&newtouch, touch_nr=%d\n",touch_nr);
 		}
 		if ((touch_nr > 1)) {
 			pr_info(LOGTAG"ON\n");
