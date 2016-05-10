@@ -69,7 +69,8 @@ int machine_kexec_prepare(struct kimage *image)
 
 		if (be32_to_cpu(header) == OF_DT_HEADER)
 		{
-			kexec_boot_atags = current_segment->mem;
+			//kexec_boot_atags = current_segment->mem;
+			mem_text_write_kernel_word(&kexec_boot_atags, current_segment->mem);
 #ifdef CONFIG_KEXEC_HARDBOOT
 			mem_text_write_kernel_word(&kexec_boot_atags_len, current_segment->memsz);
 #endif

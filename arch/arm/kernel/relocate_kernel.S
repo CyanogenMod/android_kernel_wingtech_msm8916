@@ -9,6 +9,7 @@
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
   #include <mach/iomap.h>
 #elif defined(CONFIG_ARCH_APQ8064) || defined(CONFIG_ARCH_MSM8916)
+  #include <asm/memory.h>
   #include <mach/msm_iomap.h>
 #endif
 #endif
@@ -111,7 +112,7 @@ loop:	b	loop
 loop:	b	loop
 #elif defined(CONFIG_ARCH_MSM8916)
 	/* Restart using the PMIC chip, see mach-msm/restart.c */
-	ldr	r0, =MSM8916_APCS_GCC_PHYS
+	ldr	r0, =MSM8916_KEXEC_HARDBOOT
 	mov	r1, #0
 	str	r1, [r0, #0]
 loop:	b	loop
