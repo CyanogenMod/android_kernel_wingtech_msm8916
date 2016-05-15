@@ -59,6 +59,8 @@ static void __init msm8916_dt_reserve(void)
 #endif
 #endif
 
+	pr_info("%s:%d Dumping Memblock Stats.....\n", __func__, __LINE__);
+	__memblock_dump_all();
 	of_scan_flat_dt(dt_scan_for_memory_reserve, NULL);
 }
 
