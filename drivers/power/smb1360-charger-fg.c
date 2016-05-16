@@ -439,6 +439,9 @@ struct smb1360_chip {
 	bool				batt_warm;
 	bool				batt_cool;
 	bool				batt_full;
+#ifdef CONFIG_MACH_WT88047
+	bool				power_ok;
+#endif
 	bool				resume_completed;
 	bool				irq_waiting;
 	bool				irq_disabled;
@@ -542,6 +545,10 @@ static void smb1360_wakeup_src_init(struct smb1360_chip *chip)
 	spin_lock_init(&chip->smb1360_ws.ws_lock);
 	wakeup_source_init(&chip->smb1360_ws.source, "smb1360");
 }
+
+#ifdef CONFIG_MACH_WT88047
+static int high_temp_chg = 1;
+#endif
 
 static int is_between(int value, int left, int right)
 {
@@ -1246,6 +1253,7 @@ static enum power_supply_property smb1360_battery_properties[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CHARGING_ENABLED,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_CAPACITY,
@@ -1270,7 +1278,7 @@ static int smb1360_get_prop_batt_status(struct smb1360_chip *chip)
 	if (is_device_suspended(chip))
 		return POWER_SUPPLY_STATUS_UNKNOWN;
 
-	if (chip->batt_full)
+	if (chip->batt_full && chip->usb_present)
 		return POWER_SUPPLY_STATUS_FULL;
 
 	rc = smb1360_read(chip, STATUS_3_REG, &reg);
@@ -1280,6 +1288,11 @@ static int smb1360_get_prop_batt_status(struct smb1360_chip *chip)
 	}
 
 	pr_debug("STATUS_3_REG = %x\n", reg);
+
+#ifdef CONFIG_MACH_WT88047
+	if (!chip->power_ok)
+		return POWER_SUPPLY_STATUS_DISCHARGING;
+#endif
 
 	if (reg & CHG_HOLD_OFF_BIT)
 		return POWER_SUPPLY_STATUS_NOT_CHARGING;
@@ -1367,6 +1380,13 @@ static int smb1360_get_prop_batt_capacity(struct smb1360_chip *chip)
 
 	pr_debug("msys_soc_reg=0x%02x, fg_soc=%d batt_full = %d\n", reg,
 						soc, chip->batt_full);
+
+#ifdef CONFIG_MACH_WT88047
+	if (soc == 100 && chip->batt_full == 0)
+		chip->batt_full = 1;
+	else if (soc < 100 && chip->batt_full == 1)
+		chip->batt_full = 0;
+#endif
 
 	chip->soc_now = (chip->batt_full ? 100 : bound(soc, 0, 100));
 
@@ -2111,6 +2131,9 @@ static int smb1360_battery_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = smb1360_get_prop_batt_present(chip);
 		break;
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+		break;
 	case POWER_SUPPLY_PROP_STATUS:
 		val->intval = smb1360_get_prop_batt_status(chip);
 		break;
@@ -2286,6 +2309,16 @@ static void smb1360_jeita_work_fn(struct work_struct *work)
 							jeita_work);
 	temp = smb1360_get_prop_batt_temp(chip);
 
+#ifdef CONFIG_MACH_WT88047
+	if(!high_temp_chg && temp < chip->warm_bat_decidegc) {
+		pr_info("low temp threshold, enable charging\n");
+		smb1360_charging_disable(chip, USER, 0);
+		power_supply_changed(&chip->batt_psy);
+		power_supply_changed(chip->usb_psy);
+		high_temp_chg = 1;
+	}
+#endif
+
 	if (temp > chip->hot_bat_decidegc) {
 		/* battery status is hot, disable charge and config thresholds */
 		enable_charge = false;
@@ -2306,6 +2339,15 @@ static void smb1360_jeita_work_fn(struct work_struct *work)
 			/* Skip setting voltage/current if charging disabled */
 			goto toggle_charging;
 		}
+#ifdef CONFIG_MACH_WT88047
+		if(high_temp_chg && temp >= chip->hot_bat_decidegc) {
+			high_temp_chg = 0;
+			pr_info("high temp threshold, disable charging\n");
+			smb1360_charging_disable(chip, USER, 1);
+			power_supply_changed(&chip->batt_psy);
+			power_supply_changed(chip->usb_psy);
+		}
+#endif
 		rc = smb1360_float_voltage_set(chip, chip->warm_bat_mv);
 		if (rc) {
 			dev_err(chip->dev, "Couldn't set float voltage\n");
@@ -2767,6 +2809,15 @@ static int otg_oc_handler(struct smb1360_chip *chip, u8 rt_stat)
 	return 0;
 }
 
+#ifdef CONFIG_MACH_WT88047
+static int power_ok_handler(struct smb1360_chip *chip, u8 rt_stat)
+{
+	pr_debug("xxx::usb in::rt_stat = 0x%02x\n", rt_stat);
+	chip->power_ok = rt_stat;
+	return 0;
+}
+#endif
+
 struct smb_irq_info {
 	const char		*name;
 	int			(*smb_irq)(struct smb1360_chip *chip,
@@ -2880,6 +2931,9 @@ static struct irq_handler_info handlers[] = {
 		{
 			{
 				.name		= "power_ok",
+#ifdef CONFIG_MACH_WT88047
+				.smb_irq	= power_ok_handler,
+#endif
 			},
 			{
 				.name		= "unused",
@@ -4886,6 +4940,116 @@ static int smb1360_parse_parallel_charging_params(struct smb1360_chip *chip)
 	return 0;
 }
 
+#if defined(CONFIG_MACH_WT88047) && defined(CONFIG_BQ2022A_SUPPORT)
+extern int power_supply_set_charging_enabled(struct power_supply *psy, bool enabled);
+extern int bq2022a_get_bat_module_id(void);
+
+void smb1360_get_bat_character(struct smb1360_chip *chip)
+{
+	int rc;
+	int max_capacity = 0;
+	int capacity_coeff = 0;
+	int temp_coeff = 0;
+
+	switch (bq2022a_get_bat_module_id()) {
+	case 0:
+		max_capacity = 2200;
+		capacity_coeff = 0x8373;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 1:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 2:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 3:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 4:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 5:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85E0;
+		break;
+
+	case 6:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 7:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85E0;
+		break;
+
+	case 8:
+		max_capacity = 2200;
+		capacity_coeff = 0x8373;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 9:
+		max_capacity = 2200;
+		capacity_coeff = 0x8373;
+		temp_coeff = 0x85E0;
+		break;
+
+	case 10:
+		max_capacity = 2200;
+		capacity_coeff = 0x8373;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 17:
+		max_capacity = 2000;
+		capacity_coeff = 0x8819;
+		temp_coeff = 0x85D2;
+		break;
+
+	case 0xff:
+	default:
+		max_capacity = 0;
+		capacity_coeff = 0;
+		temp_coeff = 0;
+		pr_err("get battery ID error disable charge!!!\n");
+		rc = power_supply_set_charging_enabled(&(chip->batt_psy), 0);
+		if (rc)
+			pr_err("disable charging failed\n");
+		break;
+	}
+
+	if ((chip->batt_capacity_mah != -EINVAL) && (max_capacity))
+		chip->batt_capacity_mah = max_capacity;
+
+	if ((chip->cc_soc_coeff != -EINVAL) && (capacity_coeff))
+		chip->cc_soc_coeff = capacity_coeff;
+
+	if ((chip->fg_thermistor_c1_coeff != -EINVAL) && (temp_coeff))
+		chip->fg_thermistor_c1_coeff = temp_coeff;
+
+	pr_err("batt_capacity_mah=%d  cc_soc_coeff=0x%x  fg_thermistor_c1_coeff=0x%x \n",
+				chip->batt_capacity_mah, chip->cc_soc_coeff, chip->fg_thermistor_c1_coeff);
+}
+#endif
+
 static int smb_parse_dt(struct smb1360_chip *chip)
 {
 	int rc;
@@ -5209,6 +5373,10 @@ static int smb1360_probe(struct i2c_client *client,
 			"Unable to register batt_psy rc = %d\n", rc);
 		goto fail_hw_init;
 	}
+
+#if defined(CONFIG_MACH_WT88047) && defined(CONFIG_BQ2022A_SUPPORT)
+	smb1360_get_bat_character(chip);
+#endif
 
 	/* STAT irq configuration */
 	if (client->irq) {
