@@ -35,6 +35,7 @@ modules.builtin
 *.img
 *.rej
 *build.sh
+sha256-core.S
 
 #
 # Top-level generic files
