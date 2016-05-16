@@ -33,7 +33,10 @@
 #define KEXEC_HB_KERNEL_LOC		UL(0x3208000)
 #elif defined(CONFIG_ARCH_MSM8916)
 #define KEXEC_HB_PAGE_ADDR		UL(0x8c300000)
+#define KEXEC_HB_KERNEL_LOC		UL(0x1000000)
+/*
 #define KEXEC_HB_KERNEL_LOC		UL(0x80008000)
+*/
 #else
 #error "Adress for kexec hardboot page not defined"
 #endif
