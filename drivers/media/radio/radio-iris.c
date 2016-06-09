@@ -38,16 +38,6 @@
 #include <media/radio-iris.h>
 #include <asm/unaligned.h>
 
-#if defined(CONFIG_RADIO_IRIS_TRANSPORT) && defined(CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE)
-#define IRIS_TRANSPORT_NO_FIRMWARE
-#endif
-
-#ifdef IRIS_TRANSPORT_NO_FIRMWARE
-extern int fmsmd_ready;
-extern int radio_hci_smd_init(void);
-extern void radio_hci_smd_deregister(void);
-#endif
-
 static unsigned int rds_buf = 100;
 static int oda_agt;
 static int grp_mask;
@@ -72,6 +62,7 @@ static void radio_hci_cmd_task(unsigned long arg);
 static void radio_hci_rx_task(unsigned long arg);
 static struct video_device *video_get_dev(void);
 static DEFINE_RWLOCK(hci_task_lock);
+extern struct mutex fm_smd_enable;
 
 typedef int (*radio_hci_request_func)(struct radio_hci_dev *hdev,
 		int (*req)(struct
@@ -627,13 +618,16 @@ int radio_hci_register_dev(struct radio_hci_dev *hdev)
 }
 EXPORT_SYMBOL(radio_hci_register_dev);
 
-int radio_hci_unregister_dev(struct radio_hci_dev *hdev)
+int radio_hci_unregister_dev(void)
 {
 	struct iris_device *radio = video_get_drvdata(video_get_dev());
-	if (!radio) {
-		FMDERR(":radio is null");
+	struct radio_hci_dev *hdev = NULL;
+
+	if (!radio && !radio->fm_hdev) {
+		FMDERR("radio/hdev is null");
 		return -EINVAL;
 	}
+	hdev = radio->fm_hdev;
 
 	tasklet_kill(&hdev->rx_task);
 	tasklet_kill(&hdev->cmd_task);
@@ -641,6 +635,7 @@ int radio_hci_unregister_dev(struct radio_hci_dev *hdev)
 	skb_queue_purge(&hdev->cmd_q);
 	skb_queue_purge(&hdev->raw_q);
 
+	radio->fm_hdev = NULL;
 	return 0;
 }
 EXPORT_SYMBOL(radio_hci_unregister_dev);
@@ -5203,11 +5198,11 @@ static int iris_fops_release(struct file *file)
 		return retval;
 	}
 END:
+	mutex_lock(&fm_smd_enable);
 	if (radio->fm_hdev != NULL)
 		radio->fm_hdev->close_smd();
-#ifdef IRIS_TRANSPORT_NO_FIRMWARE
-	radio_hci_smd_deregister();
-#endif
+	mutex_unlock(&fm_smd_enable);
+
 	if (retval < 0)
 		FMDERR("Err on disable FM %d\n", retval);
 
@@ -5408,15 +5403,6 @@ static const struct v4l2_ioctl_ops iris_ioctl_ops = {
 	.vidioc_g_ext_ctrls           = iris_vidioc_g_ext_ctrls,
 };
 
-#ifdef IRIS_TRANSPORT_NO_FIRMWARE
-static int iris_fops_open(struct file *f) {
-	if (fmsmd_ready < 0) {
-		fmsmd_ready = radio_hci_smd_init();
-	}
-        return fmsmd_ready;
-}
-#endif
-
 static const struct v4l2_file_operations iris_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = video_ioctl2,
@@ -5424,9 +5410,6 @@ static const struct v4l2_file_operations iris_fops = {
 	.compat_ioctl32 = v4l2_compat_ioctl32,
 #endif
 	.release        = iris_fops_release,
-#ifdef IRIS_TRANSPORT_NO_FIRMWARE
-	.open           = iris_fops_open,
-#endif
 };
 
 static struct video_device iris_viddev_template = {

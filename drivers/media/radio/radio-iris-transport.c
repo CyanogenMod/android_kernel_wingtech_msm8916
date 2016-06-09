@@ -38,25 +38,18 @@ struct radio_data {
 	struct smd_channel  *fm_channel;
 };
 struct radio_data hs;
-#ifndef CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE
-static DEFINE_MUTEX(fm_smd_enable);
-static int fmsmd_set = 0;
+DEFINE_MUTEX(fm_smd_enable);
+static int fmsmd_set;
+static bool chan_opened;
 static int hcismd_fm_set_enable(const char *val, struct kernel_param *kp);
 module_param_call(fmsmd_set, hcismd_fm_set_enable, NULL, &fmsmd_set, 0644);
-static void radio_hci_smd_deregister(void);
-#else
-int fmsmd_ready = -1;
-void radio_hci_smd_deregister(void);
-#endif
 static struct work_struct *reset_worker;
+static void radio_hci_smd_deregister(void);
+static void radio_hci_smd_exit(void);
 
 static void radio_hci_smd_destruct(struct radio_hci_dev *hdev)
 {
-	if (hs.hdev != NULL) {
-		radio_hci_unregister_dev(hs.hdev);
-		kfree(hs.hdev);
-		hs.hdev = NULL;
-	}
+	radio_hci_unregister_dev();
 }
 
 
@@ -177,12 +170,11 @@ static int radio_hci_smd_register_dev(struct radio_data *hsmd)
 	if (hdev == NULL)
 		return -ENODEV;
 
-	hsmd->hdev = hdev;
 	tasklet_init(&hsmd->rx_task, radio_hci_smd_recv_event,
 		(unsigned long) hsmd);
 	hdev->send  = radio_hci_smd_send_frame;
 	hdev->destruct = radio_hci_smd_destruct;
-	hdev->close_smd = radio_hci_smd_deregister;
+	hdev->close_smd = radio_hci_smd_exit;
 
 	/* Open the SMD Channel and device and register the callback function */
 	rc = smd_named_open_on_edge("APPS_FM", SMD_APPS_WCNSS,
@@ -205,49 +197,51 @@ static int radio_hci_smd_register_dev(struct radio_data *hsmd)
 		return -ENODEV;
 	}
 
+	hsmd->hdev = hdev;
 	return 0;
 }
 
-#ifdef CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE
-void radio_hci_smd_deregister(void)
-#else
 static void radio_hci_smd_deregister(void)
-#endif
 {
-	struct radio_data *hsmd = &hs;
-
-	if (hsmd == NULL)
-		goto done;
-
-	if (hs.hdev != NULL) {
-		radio_hci_unregister_dev(hs.hdev);
-		kfree(hs.hdev);
-		hs.hdev = NULL;
-	}
+	radio_hci_unregister_dev();
+	kfree(hs.hdev);
+	hs.hdev = NULL;
 
 	smd_close(hs.fm_channel);
 	hs.fm_channel = 0;
-done:
-#ifdef CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE
-	fmsmd_ready = -1;
-#else
 	fmsmd_set = 0;
-#endif
 }
 
-#ifdef CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE
-int radio_hci_smd_init(void)
-#else
 static int radio_hci_smd_init(void)
-#endif
 {
-	return radio_hci_smd_register_dev(&hs);
+	int ret;
+
+	if (chan_opened) {
+		FMDBG("Channel is already opened");
+		return 0;
+	}
+
+	/* this should be called with fm_smd_enable lock held */
+	ret = radio_hci_smd_register_dev(&hs);
+	if (ret < 0) {
+		FMDERR("Failed to register smd device");
+		chan_opened = false;
+		return ret;
+	}
+	chan_opened = true;
+	return ret;
 }
 
-#ifndef CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE
 static void radio_hci_smd_exit(void)
 {
+	if (!chan_opened) {
+		FMDBG("Channel already closed");
+		return;
+	}
+
+	/* this should be called with fm_smd_enable lock held */
 	radio_hci_smd_deregister();
+	chan_opened = false;
 }
 
 static int hcismd_fm_set_enable(const char *val, struct kernel_param *kp)
@@ -272,7 +266,6 @@ done:
 	mutex_unlock(&fm_smd_enable);
 	return ret;
 }
-#endif
 MODULE_DESCRIPTION("FM SMD driver");
 MODULE_AUTHOR("Ankur Nandwani <ankurn@codeaurora.org>");
 MODULE_LICENSE("GPL v2");
