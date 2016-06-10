@@ -4729,17 +4729,18 @@ static VOS_STATUS hdd_parse_ese_beacon_req(tANI_U8 *pValue,
     /*no argument followed by spaces*/
     if ('\0' == *inPtr) return -EINVAL;
 
-    /*getting the first argument ie measurement token*/
+    /*getting the first argument ie Number of IE fields */
     v = sscanf(inPtr, "%31s ", buf);
     if (1 != v) return -EINVAL;
 
     v = kstrtos32(buf, 10, &tempInt);
     if ( v < 0) return -EINVAL;
 
+    tempInt = VOS_MIN(tempInt, SIR_ESE_MAX_MEAS_IE_REQS);
     pEseBcnReq->numBcnReqIe = tempInt;
 
-    VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-               "Number of Bcn Req Ie fields(%d)", pEseBcnReq->numBcnReqIe);
+    hddLog(LOG1, "Number of Bcn Req Ie fields: %d", pEseBcnReq->numBcnReqIe);
+
 
     for (j = 0; j < (pEseBcnReq->numBcnReqIe); j++)
     {
@@ -8825,9 +8826,9 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
    unregister_inetaddr_notifier(&pHddCtx->ipv4_notifier);
 
    // Unregister the Net Device Notifier
-   //unregister_netdevice_notifier(&hdd_netdev_notifier);
+   unregister_netdevice_notifier(&hdd_netdev_notifier);
    
-   //hdd_stop_all_adapters( pHddCtx );
+   hdd_stop_all_adapters( pHddCtx );
 
 #ifdef WLAN_BTAMP_FEATURE
    vosStatus = WLANBAP_Stop(pVosContext);
@@ -10304,7 +10305,6 @@ int hdd_wlan_startup(struct device *dev )
    }
 
    // register net device notifier for device change notification
-/*
    ret = register_netdevice_notifier(&hdd_netdev_notifier);
 
    if(ret < 0)
@@ -10312,13 +10312,12 @@ int hdd_wlan_startup(struct device *dev )
       hddLog(VOS_TRACE_LEVEL_ERROR,"%s: register_netdevice_notifier failed",__func__);
       goto err_unregister_pmops;
    }
-*/
 
    //Initialize the nlink service
    if(nl_srv_init() != 0)
    {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: nl_srv_init failed", __func__);
-      goto err_nl_srv;
+      goto err_reg_netdev;
    }
 
 #ifdef WLAN_KD_READY_NOTIFIER
@@ -10481,8 +10480,8 @@ err_nl_srv:
 #else
    nl_srv_exit();
 #endif /* WLAN_KD_READY_NOTIFIER */
-//err_reg_netdev:
-//   unregister_netdevice_notifier(&hdd_netdev_notifier);
+err_reg_netdev:
+   unregister_netdevice_notifier(&hdd_netdev_notifier);
 
 err_unregister_pmops:
    hddDevTmUnregisterNotifyCallback(pHddCtx);
